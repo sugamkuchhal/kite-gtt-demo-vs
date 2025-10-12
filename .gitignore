@@ -1,0 +1,9 @@
+# Ignore Python cache and macOS files
+__pycache__/
+.DS_Store
+
+# Ignore secret / credential files
+*.json
+*.txt
+
+# You can remove this filter later if you want some .txt files
