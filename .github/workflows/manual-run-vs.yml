@@ -28,41 +28,46 @@ jobs:
           sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -fy install
           google-chrome --version
 
-      - name: Install dependencies
+      - name: Install dependencies (system-wide)
         run: |
-          pip install gspread gspread-formatting kiteconnect pandas requests retrying tqdm \
+          sudo python3 -m pip install --upgrade pip
+          sudo python3 -m pip install \
+            gspread gspread-formatting kiteconnect pandas requests retrying tqdm \
             google-auth google-auth-oauthlib google-auth-httplib2 webdriver-manager selenium pyotp
 
-      - name: Recreate secret files (keep Mac path)
+      - name: Recreate secret files (keep Mac path + repo root)
         env:
           API_KEY_VS: ${{ secrets.API_KEY_VS }}
           ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }}
           CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}
         run: |
           set -euo pipefail
-          MACDIR=/Users/sugamkuchhal/Documents/kite-gtt-demo-vs
-      
-          # Create the Mac-style path (may or may not be usable)
-          sudo mkdir -p "$MACDIR" || true
-      
-          # Write files to repo root (always readable)
-          [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" > api_key_vs.txt
-          [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" > access_token_vs.txt
-          if [ -n "$CREDS_VS_JSON" ]; then
-            printf '%s' "$CREDS_VS_JSON" > creds_vs.json
+          MACDIR="/Users/sugamkuchhal/Documents/kite-gtt-demo-vs"
+
+          echo "📁 Creating Mac-style directory..."
+          sudo mkdir -p "$MACDIR"
+          sudo chmod -R 777 /Users || true
+
+          echo "🪄 Writing secret files..."
+          if [ -n "$API_KEY_VS" ]; then
+            echo "$API_KEY_VS" | sudo tee "$MACDIR/api_key_vs.txt" > /dev/null
+            echo "$API_KEY_VS" > api_key_vs.txt
           fi
-      
-          # Best-effort: also mirror to the Mac-style path (ignore failures)
-          [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" | sudo tee "$MACDIR/api_key_vs.txt" >/dev/null || true
-          [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" | sudo tee "$MACDIR/access_token_vs.txt" >/dev/null || true
-          [ -n "$CREDS_VS_JSON" ] && printf '%s' "$CREDS_VS_JSON" | sudo tee "$MACDIR/creds_vs.json" >/dev/null || true
 
-          echo "✅ Secrets written to repo root (and mirrored to Mac path if possible)."
-          ls -l creds_vs.json api_key_vs.txt access_token_vs.txt
+          if [ -n "$ACCESS_TOKEN_VS" ]; then
+            echo "$ACCESS_TOKEN_VS" | sudo tee "$MACDIR/access_token_vs.txt" > /dev/null
+            echo "$ACCESS_TOKEN_VS" > access_token_vs.txt
+          fi
 
-      - name: Point code to local creds file for this run
-        run: |
-          sed -i 's#/Users/sugamkuchhal/Documents/kite-gtt-demo-vs/creds_vs.json#creds_vs.json#g' fetch_holdings_vs.py || true
-          
-      - name: Run your command
-        run: ${{ github.event.inputs.command }}
+          if [ -n "$CREDS_VS_JSON" ]; then
+            echo "$CREDS_VS_JSON" | sudo tee "$MACDIR/creds_vs.json" > /dev/null
+            echo "$CREDS_VS_JSON" > creds_vs.json
+          fi
+
+          sudo chmod -R 777 "$MACDIR"
+          echo "✅ Secrets written successfully."
+          ls -l "$MACDIR" || true
+          ls -l creds_vs.json || true
+
+      - name: Run your command as root (preserve env)
+        run: sudo -E bash -lc '${{ github.event.inputs.command }}'
