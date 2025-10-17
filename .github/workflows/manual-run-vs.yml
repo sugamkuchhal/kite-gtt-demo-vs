@@ -39,28 +39,30 @@ jobs:
           ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }}
           CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}
         run: |
-          set -e
+          set -euo pipefail
           MACDIR=/Users/sugamkuchhal/Documents/kite-gtt-demo-vs
 
-          # Create Mac-like directory as root (needed for /Users), then give it back to runner
+          # Create Mac-like path, then hand ownership + traversal perms to runner
           sudo mkdir -p "$MACDIR"
+          RUNNER_USER="$(id -un)"; RUNNER_GROUP="$(id -gn)"
+          sudo chown -R "$RUNNER_USER:$RUNNER_GROUP" /Users /Users/sugamkuchhal /Users/sugamkuchhal/Documents "$MACDIR" || true
+          sudo chmod 755 /Users /Users/sugamkuchhal /Users/sugamkuchhal/Documents "$MACDIR"
 
-          # Write to Mac path (hardcoded locations)
-          [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" | sudo tee "$MACDIR/api_key_vs.txt" > /dev/null
-          [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" | sudo tee "$MACDIR/access_token_vs.txt" > /dev/null
+          # Write files to Mac path as runner (no sudo => no root-owned files)
+          [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" > "$MACDIR/api_key_vs.txt"
+          [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" > "$MACDIR/access_token_vs.txt"
           if [ -n "$CREDS_VS_JSON" ]; then
-            printf '%s' "$CREDS_VS_JSON" | sudo tee "$MACDIR/creds_vs.json" > /dev/null
+            printf '%s' "$CREDS_VS_JSON" > "$MACDIR/creds_vs.json"
           fi
+          chmod 600 "$MACDIR"/api_key_vs.txt "$MACDIR"/access_token_vs.txt "$MACDIR"/creds_vs.json || true
 
-          # Hand ownership to the runner user and set readable perms
-          sudo chown -R "$USER":"$USER" "$MACDIR"
-          chmod 644 "$MACDIR/creds_vs.json" || true
-
-          # ALSO write to repo root (files your code opens without path)
+          # Also write to repo root for scripts that read relative paths
           [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" > api_key_vs.txt
           [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" > access_token_vs.txt
 
-          # sanity
-          ls -l "$MACDIR/creds_vs.json" api_key_vs.txt access_token_vs.txt          
+          # Sanity (no secret contents shown)
+          ls -ld /Users /Users/sugamkuchhal /Users/sugamkuchhal/Documents "$MACDIR"
+          ls -l "$MACDIR/creds_vs.json" api_key_vs.txt access_token_vs.txt
+          
       - name: Run your command
         run: ${{ github.event.inputs.command }}
