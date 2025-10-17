@@ -39,9 +39,10 @@ jobs:
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN_VS }}
           CREDS_JSON: ${{ secrets.CREDS_VS_JSON }}
         run: |
-          [ -n "$API_KEY" ] && echo "$API_KEY" > api_key_vs.txt || true
-          [ -n "$ACCESS_TOKEN" ] && echo "$ACCESS_TOKEN" > access_token_vs.txt || true
-          [ -n "$CREDS_JSON" ] && echo "$CREDS_JSON" > creds_vs.json || true
+          mkdir -p /Users/sugamkuchhal/Documents/kite-gtt-demo-vs
+          [ -n "$API_KEY_VS" ] && echo "$API_KEY_VS" > /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/api_key_vs.txt || true
+          [ -n "$ACCESS_TOKEN_VS" ] && echo "$ACCESS_TOKEN_VS" > /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/access_token_vs.txt || true
+          [ -n "$CREDS_VS_JSON" ] && echo "$CREDS_VS_JSON" > /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/creds_vs.json || true
 
       - name: Run your command
         run: ${{ github.event.inputs.command }}
