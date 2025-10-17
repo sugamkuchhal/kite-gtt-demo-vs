@@ -38,22 +38,29 @@ jobs:
           CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}
         run: |
           set -e
-          # Mac-like directory
-          sudo mkdir -p /Users/sugamkuchhal/Documents/kite-gtt-demo-vs
+          MACDIR=/Users/sugamkuchhal/Documents/kite-gtt-demo-vs
 
-          # --- Write to Mac path (your hardcoded locations)
-          [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" | sudo tee /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/api_key_vs.txt > /dev/null
-          [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" | sudo tee /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/access_token_vs.txt > /dev/null
-          [ -n "$CREDS_VS_JSON" ] && printf '%s' "$CREDS_VS_JSON" | sudo tee /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/creds_vs.json > /dev/null
-          sudo chmod 600 /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/creds_vs.json || true
+          # Create Mac-like directory as root (needed for /Users), then give it back to runner
+          sudo mkdir -p "$MACDIR"
 
-          # --- ALSO write to repo root (what your code opens: "api_key_vs.txt")
+          # Write to Mac path (hardcoded locations)
+          [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" | sudo tee "$MACDIR/api_key_vs.txt" > /dev/null
+          [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" | sudo tee "$MACDIR/access_token_vs.txt" > /dev/null
+          if [ -n "$CREDS_VS_JSON" ]; then
+            printf '%s' "$CREDS_VS_JSON" | sudo tee "$MACDIR/creds_vs.json" > /dev/null
+          fi
+
+          # Hand ownership to the runner user and set readable perms
+          sudo chown -R "$USER":"$USER" "$MACDIR"
+          chmod 644 "$MACDIR/creds_vs.json" || true
+
+          # ALSO write to repo root (files your code opens without path)
           [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" > api_key_vs.txt
           [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" > access_token_vs.txt
 
-          # quick sanity
-          ls -l api_key_vs.txt access_token_vs.txt
-
+          # sanity
+          ls -l "$MACDIR/creds_vs.json" api_key_vs.txt access_token_vs.txt
+          
       - name: Run scripts
         run: |
           python3 fetch_holdings_vs.py
