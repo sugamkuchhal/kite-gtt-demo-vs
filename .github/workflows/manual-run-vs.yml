@@ -28,10 +28,11 @@ jobs:
           sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -fy install
           google-chrome --version
 
-      - name: Install dependencies (system-wide)
+      - name: Install dependencies (system-wide, no pip upgrade)
+        env:
+          PIP_BREAK_SYSTEM_PACKAGES: "1"
         run: |
-          sudo python3 -m pip install --upgrade pip
-          sudo python3 -m pip install \
+          sudo -E python3 -m pip install \
             gspread gspread-formatting kiteconnect pandas requests retrying tqdm \
             google-auth google-auth-oauthlib google-auth-httplib2 webdriver-manager selenium pyotp
 
