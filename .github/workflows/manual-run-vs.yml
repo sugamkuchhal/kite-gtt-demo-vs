@@ -11,6 +11,7 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -28,11 +29,12 @@ jobs:
           sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -fy install
           google-chrome --version
 
-      - name: Install dependencies (system-wide, no pip upgrade)
-        env:
-          PIP_BREAK_SYSTEM_PACKAGES: "1"
+      # ---- KEY CHANGE: use a venv so we don't touch Debian's system packages
+      - name: Create virtualenv and install deps (no system pip upgrade)
         run: |
-          sudo -E python3 -m pip install \
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/pip install \
             gspread gspread-formatting kiteconnect pandas requests retrying tqdm \
             google-auth google-auth-oauthlib google-auth-httplib2 webdriver-manager selenium pyotp
 
@@ -45,30 +47,25 @@ jobs:
           set -euo pipefail
           MACDIR="/Users/sugamkuchhal/Documents/kite-gtt-demo-vs"
 
-          echo "📁 Creating Mac-style directory..."
-          sudo mkdir -p "$MACDIR"
-          sudo chmod -R 777 /Users || true
+          # Create the Mac-style path (may need sudo for /Users)
+          sudo mkdir -p "$MACDIR" || true
 
-          echo "🪄 Writing secret files..."
-          if [ -n "$API_KEY_VS" ]; then
-            echo "$API_KEY_VS" | sudo tee "$MACDIR/api_key_vs.txt" > /dev/null
-            echo "$API_KEY_VS" > api_key_vs.txt
-          fi
-
-          if [ -n "$ACCESS_TOKEN_VS" ]; then
-            echo "$ACCESS_TOKEN_VS" | sudo tee "$MACDIR/access_token_vs.txt" > /dev/null
-            echo "$ACCESS_TOKEN_VS" > access_token_vs.txt
-          fi
-
+          # Write readable copies in repo root (always available)
+          [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" > api_key_vs.txt
+          [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" > access_token_vs.txt
           if [ -n "$CREDS_VS_JSON" ]; then
-            echo "$CREDS_VS_JSON" | sudo tee "$MACDIR/creds_vs.json" > /dev/null
-            echo "$CREDS_VS_JSON" > creds_vs.json
+            printf '%s' "$CREDS_VS_JSON" > creds_vs.json
           fi
 
-          sudo chmod -R 777 "$MACDIR"
-          echo "✅ Secrets written successfully."
-          ls -l "$MACDIR" || true
-          ls -l creds_vs.json || true
+          # Best-effort mirror to the Mac path (ignore failures)
+          [ -n "$API_KEY_VS" ] && printf '%s' "$API_KEY_VS" | sudo tee "$MACDIR/api_key_vs.txt" >/dev/null || true
+          [ -n "$ACCESS_TOKEN_VS" ] && printf '%s' "$ACCESS_TOKEN_VS" | sudo tee "$MACDIR/access_token_vs.txt" >/dev/null || true
+          [ -n "$CREDS_VS_JSON" ] && printf '%s' "$CREDS_VS_JSON" | sudo tee "$MACDIR/creds_vs.json" >/dev/null || true
 
-      - name: Run your command as root (preserve env)
-        run: sudo -E bash -lc '${{ github.event.inputs.command }}'
+          echo "✅ Secrets written (repo root + Mac path mirror)."
+          ls -l creds_vs.json api_key_vs.txt access_token_vs.txt || true
+
+      # Run as root so hardcoded /Users/... files are readable; use the venv Python
+      - name: Run your command (root + venv)
+        run: |
+          sudo -E bash -lc 'source .venv/bin/activate && ${{ github.event.inputs.command }}'
