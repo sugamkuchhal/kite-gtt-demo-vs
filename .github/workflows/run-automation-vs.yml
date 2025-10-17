@@ -36,10 +36,11 @@ jobs:
           API_KEY: ${{ secrets.API_KEY_VS }}
           ACCESS_TOKEN: ${{ secrets.ACCESS_TOKEN_VS }}
           CREDS_JSON: ${{ secrets.CREDS_VS_JSON }}
-        run: |
-          echo "$API_KEY" > api_key_vs.txt
-          echo "$ACCESS_TOKEN" > access_token_vs.txt
-          echo "$CREDS_JSON" > creds_vs.json
+       run: |
+          mkdir -p /Users/sugamkuchhal/Documents/kite-gtt-demo-vs
+          [ -n "$API_KEY_VS" ] && echo "$API_KEY_VS" > /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/api_key_vs.txt || true
+          [ -n "$ACCESS_TOKEN_VS" ] && echo "$ACCESS_TOKEN_VS" > /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/access_token_vs.txt || true
+          [ -n "$CREDS_VS_JSON" ] && echo "$CREDS_VS_JSON" > /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/creds_vs.json || true
 
       - name: Run scripts
         run: |
