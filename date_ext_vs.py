@@ -5,6 +5,13 @@ from google.oauth2.service_account import Credentials
 
 CREDS_PATH = "/Users/sugamkuchhal/Documents/kite-gtt-demo-vs/creds_vs.json"
 
+def get_client():
+    creds = Credentials.from_service_account_file(
+        CREDS_PATH,
+        scopes=["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    )
+    return gspread.authorize(creds)
+
 def get_ws(sheet_name, tab_name):
     creds = Credentials.from_service_account_file(
         CREDS_PATH,
@@ -38,11 +45,26 @@ try:
 
     after = ws4_des.acell("A2").value
 
-    with open("/Users/sugamkuchhal/Documents/kite-gtt-demo-vs/friday_date_ext_vs.txt", "w") as f:
-        f.write("1\n" if after != before else "0\n")
+    changed = (after != before)  # raw text comparison, same as before
+    gc = get_client()
+    flag_sh = gc.open_by_key("145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI")
+    flag_ws = flag_sh.worksheet("ALL_OLD_GTTs")
+
+    # Write boolean TRUE/FALSE to R1 (Google Sheets boolean, not string)
+    flag_ws.update("R1", [[changed]])
+
 except:
-    with open("/Users/sugamkuchhal/Documents/kite-gtt-demo-vs/friday_date_ext_vs.txt", "w") as f:
-        f.write("0\n")
+
+    # On any exception, write boolean FALSE (same behavior as old "0")
+    try:
+        gc = get_client()
+        flag_sh = gc.open_by_key("145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI")
+        flag_ws = flag_sh.worksheet("ALL_OLD_GTTs")
+        flag_ws.update("R1", [[False]])
+    except:
+
+        # If even the flag write fails, there's nothing further we can do.
+        pass
 
 sh5_src, ws5_src = get_ws("VS Portfolio", "CREDIT_CANDIDATES")
 sh5_des, ws5_des = get_ws("VS Portfolio", "CREDIT_CANDIDATES")
