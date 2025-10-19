@@ -21,18 +21,7 @@ python3 ops_sort_vs.py --sheet-name="VS D G B - Turtle Trading with BOH" \
     --red-tab="Old_GTT_List" \
     --yellow-tab="Action_List"
 
-if [ "$(head -n 1 /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/friday_date_ext_vs.txt)" = "0" ]; then
-    
-    python3 set_field_false_vs.py
-
-    echo ""
-
-fi
-
-
 if [ "$(head -n 1 /Users/sugamkuchhal/Documents/kite-gtt-demo-vs/friday_date_ext_vs.txt)" = "1" ]; then
-
-    python3 set_field_true_vs.py
 
     echo "Running: KWK"
 
