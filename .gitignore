@@ -1,9 +1,13 @@
 # Ignore Python cache and macOS files
 __pycache__/
 .DS_Store
+*.pyc
 
-# Ignore secret / credential files
-*.json
-*.txt
+# Binaries & drivers
+chromedriver
 
-# You can remove this filter later if you want some .txt files
+# Secrets / tokens / keys
+access_token_vs.txt
+api_key_vs.txt
+creds_vs.json
+
