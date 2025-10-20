@@ -42,9 +42,9 @@ jobs:
 
       - name: Recreate secret files (repo root + Mac path mirror)
         env:
-          API_KEY_VS: ${{ secrets.API_KEY }}
-          ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN }}
-          CREDS_VS_JSON: ${{ secrets.CREDS_JSON }}
+          API_KEY_VS: ${{ secrets.API_KEY_VS }}
+          ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }}
+          CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}
         run: |
           set -euo pipefail
           MACDIR="/Users/sugamkuchhal/Documents/kite-gtt-demo-vs"
