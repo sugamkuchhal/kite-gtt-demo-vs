@@ -33,8 +33,10 @@ def find_next_empty_row(ws):
 
 def main():
     args = parse_args()
+    log("")
     gc = gspread.service_account(filename=CREDENTIALS_PATH)
     wb = gc.open(args.sheet_name)
+
     green_ws = wb.worksheet(args.green_tab)
     red_ws = wb.worksheet(args.red_tab)
     yellow_ws = wb.worksheet(args.yellow_tab)
@@ -42,6 +44,11 @@ def main():
     green_rows = green_ws.get_values("A2:O")
     red_rows = red_ws.get_values("A2:O")
     yellow_rows = yellow_ws.get_values("A2:O")
+
+    # NEW: compute first empty row indices once (A1:O1 is header)
+    green_next  = len(green_rows)  + 2
+    red_next    = len(red_rows)    + 2
+    yellow_next = len(yellow_rows) + 2
 
     log(f"⚙️ SCRIPT STARTED for {wb.title}")
 
@@ -64,6 +71,7 @@ def main():
         # Clear all except header
         yellow_ws.batch_clear([f"A2:O{yellow_ws.row_count}"])
         log("CLEAR TASK: Rows cleared from Action Sheet")
+        yellow_next = 2  # IMPORTANT: after clearing, first empty row is row 2
     else:
         log("CLEAR TASK: Nothing to clear")
 
@@ -88,8 +96,9 @@ def main():
 
     # Batch append to Yellow
     if yellow_update_rows:
-        start_row = find_next_empty_row(yellow_ws)
+        start_row = yellow_next
         yellow_ws.update(range_name=f"A{start_row}:O{start_row+len(yellow_update_rows)-1}", values=yellow_update_rows, value_input_option='USER_ENTERED')
+        yellow_next += len(yellow_update_rows)
 
     # --- BATCHED: Batch update Red (all at once, not per-row) ---
     if red_update_idxs and red_update_values:
@@ -110,12 +119,14 @@ def main():
         red_insert_rows.append([green_row[0], green_row[1], green_row[2], green_row[3], green_row[4]])
 
     if yellow_insert_rows:
-        start_row = find_next_empty_row(yellow_ws)
+        start_row = yellow_next
         yellow_ws.update(range_name=f"A{start_row}:O{start_row+len(yellow_insert_rows)-1}", values=yellow_insert_rows, value_input_option='USER_ENTERED')
+        yellow_next += len(yellow_insert_rows)
 
     if red_insert_rows:
-        start_row = find_next_empty_row(red_ws)
+        start_row = red_next
         red_ws.update(range_name=f"A{start_row}:E{start_row+len(red_insert_rows)-1}", values=red_insert_rows, value_input_option='USER_ENTERED')
+        red_next += len(red_insert_rows)
 
     # --------- 4. BATCH DELETE TASK ---------
     log("DELETE TASK: Looking for 'Delete' rows in Red Sheet")
@@ -130,8 +141,9 @@ def main():
 
     # Append all delete actions to Yellow at once
     if yellow_delete_rows:
-        start_row = find_next_empty_row(yellow_ws)
+        start_row = yellow_next
         yellow_ws.update(range_name=f"A{start_row}:O{start_row+len(yellow_delete_rows)-1}", values=yellow_delete_rows, value_input_option='USER_ENTERED')
+        yellow_next += len(yellow_delete_rows)
 
     # --- BATCHED: Clear A–E of all relevant Red rows at once ---
     if red_delete_idxs:
