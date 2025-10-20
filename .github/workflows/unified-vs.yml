@@ -73,6 +73,6 @@ jobs:
               python3 fetch_holdings_vs.py
               python3 date_ext_vs.py
               python3 data_val_vs.py
-              bash combined_run.sh
+              bash combined_run_vs.sh
             fi
           '
