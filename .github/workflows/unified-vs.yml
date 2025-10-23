@@ -2,8 +2,10 @@ name: Unified Script Runner VS
 
 on:
   schedule:
-    - cron: "0,30 4-9 * * 1-5"   # 09:30–15:00 IST every 30 mins, Mon–Fri
-    - cron: "30 11 * * 1-5"      # 17:00 IST, Mon–Fri
+    # 09:30–15:00 IST every 30 mins, Mon–Fri
+    - cron: "0,30 4-9 * * 1-5"
+    # 17:00 IST (EOD), Mon–Fri
+    - cron: "30 11 * * 1-5"
   workflow_dispatch:
     inputs:
       command:
@@ -31,7 +33,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # ---------------- PRE (no Chrome yet) ----------------
+      # PRE (no Chrome yet)
       - name: Set timezone (IST)
         shell: bash
         run: echo "TZ=Asia/Kolkata" >> "$GITHUB_ENV"
@@ -50,11 +52,10 @@ jobs:
           python -m pip install --upgrade pip
           pip install kiteconnect requests
 
-      # api_key_vs.txt must be the 5-line file your login script expects
       - name: Recreate essential secret files in $RUNNER_TEMP and symlink into CWD
         shell: bash
         env:
-          API_KEY_VS: ${{ secrets.API_KEY_VS }}       # 5 lines: api_key, api_secret, user_id, password, totp_seed
+          API_KEY_VS: ${{ secrets.API_KEY_VS }}
           ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }}
           CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}
         run: |
@@ -93,22 +94,17 @@ jobs:
 
           STATUS="refresh"
           if [[ -s "./access_token_vs.txt" ]]; then
-            python - <<'PY' || exit 2
-from kiteconnect import KiteConnect
-lines = [l.strip() for l in open("api_key_vs.txt").read().splitlines()]
-api_key = lines[0]
-token   = open("access_token_vs.txt").read().strip()
-kite = KiteConnect(api_key=api_key)
-kite.set_access_token(token)
-kite.margins()  # raises if invalid/expired
-PY
-            if [[ $? -eq 0 ]]; then STATUS="ok"; fi
+            python -c "from kiteconnect import KiteConnect; \
+lines=[l.strip() for l in open('api_key_vs.txt').read().splitlines()]; \
+api_key=lines[0]; token=open('access_token_vs.txt').read().strip(); \
+k=KiteConnect(api_key=api_key); k.set_access_token(token); k.margins()" \
+            && STATUS="ok" || STATUS="refresh"
           fi
 
           echo "auth_status=${STATUS}" >> "$GITHUB_OUTPUT"
           echo "::notice::Kite auth preflight: ${STATUS}"
 
-      # -------- IF REFRESH NEEDED → JIT Chrome & headless login --------
+      # IF REFRESH NEEDED → JIT Chrome & headless login
       - name: Setup Chrome (JIT)
         if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
         uses: browser-actions/setup-chrome@v1
@@ -152,18 +148,13 @@ PY
         run: |
           set -euo pipefail
           source .venv/bin/activate
-          python - <<'PY'
-from kiteconnect import KiteConnect
-lines = [l.strip() for l in open("api_key_vs.txt").read().splitlines()]
-api_key = lines[0]
-token   = open("access_token_vs.txt").read().strip()
-kite = KiteConnect(api_key=api_key)
-kite.set_access_token(token)
-kite.margins()
-PY
+          python -c "from kiteconnect import KiteConnect; \
+lines=[l.strip() for l in open('api_key_vs.txt').read().splitlines()]; \
+api_key=lines[0]; token=open('access_token_vs.txt').read().strip(); \
+k=KiteConnect(api_key=api_key); k.set_access_token(token); k.margins()"
           echo "auth_status_final=ok" >> "$GITHUB_OUTPUT"
 
-      # ---------------- POST (only proceed if auth is OK) ----------------
+      # POST (only proceed if auth is OK)
       - name: Compute auth gate
         id: authgate
         shell: bash
@@ -201,23 +192,19 @@ PY
           set -euo pipefail
           source .venv/bin/activate
 
-          # 1) Manual command overrides everything
           if [[ -n "${INPUT_COMMAND:-}" ]]; then
             echo "::notice::Running manual command: ${INPUT_COMMAND}"
             eval "${INPUT_COMMAND}"
             exit 0
           fi
 
-          # 2) Normalize run_type (default auto)
           RT="${RUN_TYPE:-auto}"
 
-          # Helper: convert HH:MM to minutes since midnight
           hm_to_min() {
             IFS=: read -r h m <<<"$1"
             echo $((10#$h*60 + 10#$m))
           }
 
-          # 3) Auto decision window → 09:00–15:45 IST (inclusive)
           NOW_HM="$(date +%H:%M)"
           NOW_MIN="$(hm_to_min "$NOW_HM")"
           MID_START="$(hm_to_min "09:00")"
@@ -227,7 +214,6 @@ PY
             IN_MIDDAY=true
           fi
 
-          # 4) Choose which chain to run
           case "$RT" in
             midday)
               echo "::notice::run_type=midday selected"
@@ -247,7 +233,6 @@ PY
               ;;
           esac
 
-          # 5) Execute the chosen chain
           if [[ "$RUN_MIDDAY" == true ]]; then
             echo "::group::RUN: Mid-day chain (VS)"
             python3 set_field_false_vs.py
