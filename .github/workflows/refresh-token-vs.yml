@@ -1,0 +1,66 @@
+name: Refresh Kite Token VS
+
+on:
+  schedule:
+    - cron: "0 19 * * 1-5"   # 12:30 AM IST = 19:00 UTC previous day
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Create venv and install deps
+        shell: bash
+        run: |
+          set -e
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install kiteconnect selenium pyotp webdriver-manager requests
+
+      - name: Write secrets
+        env:
+          API_KEY_VS: ${{ secrets.API_KEY_VS }}
+        shell: bash
+        run: |
+          set -e
+          printf '%s' "${API_KEY_VS}" > api_key_vs.txt
+
+      - name: Run headless login to get new token
+        shell: bash
+        env:
+          CI: "true"
+        run: |
+          set -e
+          source .venv/bin/activate
+          echo "::notice::Logging in via Chrome..."
+          python3 auto_login_vs.py
+          if [ ! -s access_token_vs.txt ]; then
+            echo "::error::No token after login."
+            exit 1
+          fi
+
+      - name: Update GitHub secret with new access token
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          set -e
+          NEW_TOKEN=$(cat access_token_vs.txt)
+          echo "::notice::Updating ACCESS_TOKEN_VS secret..."
+          gh secret set ACCESS_TOKEN_VS --body "$NEW_TOKEN"
+          echo "::notice::Access token updated successfully."
