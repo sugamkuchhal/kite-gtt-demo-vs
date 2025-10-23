@@ -1,7 +1,28 @@
-name: Unified Script Runner VS (sanity)
+name: Unified Script Runner VS
 
 on:
+  schedule:
+    - cron: "0,30 4-9 * * 1-5"
+    - cron: "30 11 * * 1-5"
   workflow_dispatch:
+    inputs:
+      command:
+        description: "Optional command (e.g. python3 fetch_holdings_vs.py)"
+        required: false
+        default: ""
+      run_type:
+        description: "auto / midday / eod"
+        required: false
+        type: choice
+        options:
+          - auto
+          - midday
+          - eod
+        default: auto
+
+concurrency:
+  group: unified-script-runner-vs
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -10,15 +31,139 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      # ---------- PRE (no Chrome yet) ----------
+      - name: Set up Python (with pip cache)
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
-      - name: Verify environment
+      - name: Make venv & minimal deps (preflight)
         shell: bash
         run: |
           set -e
-          echo "OK: shell and YAML parsing fine"
-          python -V
-          echo "Done."
+          python -m venv .venv
+          . .venv/bin/activate
+          python -m pip install --upgrade pip
+          pip install kiteconnect requests
+
+      - name: Write secrets into $RUNNER_TEMP and link into CWD
+        shell: bash
+        env:
+          API_KEY_VS: ${{ secrets.API_KEY_VS }}       # 5 lines: key,secret,user,pass,totp
+          ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }}
+          CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}
+        run: |
+          set -e
+          tmp="$RUNNER_TEMP"; mkdir -p "$tmp"
+          if [ -z "${API_KEY_VS:-}" ]; then
+            echo "::error::API_KEY_VS must contain 5 lines"; exit 1; fi
+          printf '%s' "$API_KEY_VS" > "$tmp/api_key_vs.txt"
+          [ -n "${ACCESS_TOKEN_VS:-}" ] && printf '%s' "$ACCESS_TOKEN_VS" > "$tmp/access_token_vs.txt" || true
+          [ -n "${CREDS_VS_JSON:-}" ] && printf '%s' "$CREDS_VS_JSON" > "$tmp/creds_vs.json" || true
+          ln -sf "$tmp/api_key_vs.txt" ./api_key_vs.txt
+          [ -f "$tmp/access_token_vs.txt" ] && ln -sf "$tmp/access_token_vs.txt" ./access_token_vs.txt || true
+          [ -f "$tmp/creds_vs.json" ] && ln -sf "$tmp/creds_vs.json" ./creds_vs.json || true
+
+      - name: Preflight auth (ok|refresh)
+        id: preflight
+        shell: bash
+        run: |
+          set -e
+          . .venv/bin/activate
+          STATUS=refresh
+          if [ -s access_token_vs.txt ]; then
+            python - <<'PY' || exit 2
+from kiteconnect import KiteConnect
+lines=[l.strip() for l in open("api_key_vs.txt")]
+api_key=lines[0]
+token=open("access_token_vs.txt").read().strip()
+k=KiteConnect(api_key=api_key); k.set_access_token(token); k.margins()
+PY
+            [ $? -eq 0 ] && STATUS=ok || STATUS=refresh
+          fi
+          echo "auth_status=$STATUS" >> "$GITHUB_OUTPUT"
+          echo "::notice::preflight=$STATUS"
+
+      # ---------- If refresh needed → JIT Chrome & login ----------
+      - name: Setup Chrome (JIT)
+        if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Install automation deps
+        if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
+        shell: bash
+        run: |
+          set -e
+          . .venv/bin/activate
+          pip install selenium pyotp webdriver-manager
+
+      - name: Headless login to refresh token
+        if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
+        shell: bash
+        env:
+          CI: "true"
+        run: |
+          set -e
+          . .venv/bin/activate
+          python3 auto_login_vs.py
+          if [ ! -s access_token_vs.txt ]; then
+            echo "::error::No token after login"; exit 1; fi
+          cp access_token_vs.txt "$RUNNER_TEMP/access_token_vs.txt"
+          rm -f access_token_vs.txt
+          ln -sf "$RUNNER_TEMP/access_token_vs.txt" ./access_token_vs.txt
+
+      # ---------- Project deps & your chain ----------
+      - name: Install full project deps
+        shell: bash
+        run: |
+          set -e
+          . .venv/bin/activate
+          pip install gspread gspread-formatting kiteconnect pandas requests retrying tqdm \
+                     google-auth google-auth-oauthlib google-auth-httplib2 selenium pyotp \
+                     yfinance oauth2client google-api-python-client
+
+      - name: Run (manual command or auto/midday/eod)
+        env:
+          INPUT_COMMAND: ${{ github.event.inputs.command }}
+          RUN_TYPE: ${{ github.event.inputs.run_type }}
+        shell: bash
+        run: |
+          set -e
+          . .venv/bin/activate
+          if [ -n "${INPUT_COMMAND:-}" ]; then
+            echo "::notice::manual: $INPUT_COMMAND"; eval "$INPUT_COMMAND"; exit 0; fi
+          hm_to_min(){ IFS=: read -r h m <<<"$1"; echo $((10#$h*60+10#$m)); }
+          NOW_HM="$(TZ=Asia/Kolkata date +%H:%M)"; NOW_MIN="$(hm_to_min "$NOW_HM")"
+          MID_START="$(hm_to_min 09:00)"; MID_END="$(hm_to_min 15:45)"
+          RT="${RUN_TYPE:-auto}"; IN_MIDDAY=false
+          [ $NOW_MIN -ge $MID_START ] && [ $NOW_MIN -le $MID_END ] && IN_MIDDAY=true || true
+          case "$RT" in
+            midday) RUN_MIDDAY=true ;;
+            eod)    RUN_MIDDAY=false ;;
+            *)      RUN_MIDDAY=$([ "$IN_MIDDAY" = true ] && echo true || echo false) ;;
+          esac
+          if [ "$RUN_MIDDAY" = true ]; then
+            echo "::group::RUN: Mid-day chain (VS)"
+            python3 set_field_false_vs.py
+            python3 fetch_all_gtts_vs.py
+            python3 fetch_all_orders_vs.py
+            python3 gtt_processor_vs.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "DEL_GTT_INS"
+            python3 gtt_processor_vs.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "INS_GTT_INS"
+            python3 gtt_processor_vs.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "GTT_INS"
+            echo "::endgroup::"
+          else
+            echo "::group::RUN: EOD chain (VS)"
+            python3 set_field_false_vs.py
+            python3 fetch_all_gtts_vs.py
+            python3 fetch_all_orders_vs.py
+            python3 append_new_orders_vs.py
+            python3 fifo_portfolio_vs.py
+            python3 fetch_holdings_vs.py
+            python3 date_ext_vs.py
+            python3 data_val_vs.py
+            bash combined_run_vs.sh
+            echo "::endgroup::"
+          fi
