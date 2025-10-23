@@ -2,8 +2,8 @@ name: Unified Script Runner VS
 
 on:
   schedule:
-    - cron: "0,30 4-9 * * 1-5"  # 09:30–15:00 IST every 30 mins, Mon–Fri
-    - cron: "30 11 * * 1-5"     # 17:00 IST (EOD), Mon–Fri
+    - cron: "0,30 4-9 * * 1-5"  # 09:30–15:00 IST every 30 mins, Mon–Fri (midday)
+    - cron: "30 11 * * 1-5"     # 17:00 IST (5:00 PM), Mon–Fri (EOD)
   workflow_dispatch:
     inputs:
       command:
@@ -14,10 +14,7 @@ on:
         description: "Optional: choose which chain to run when no command is provided."
         required: false
         type: choice
-        options:
-          - auto
-          - midday
-          - eod
+        options: [auto, midday, eod]
         default: auto
 
 # Overlap safety: new runs wait; never cancel in-progress
@@ -51,30 +48,35 @@ jobs:
           # Minimal deps to ping Kite
           pip install kiteconnect requests
 
+      # NOTE: api_key_vs.txt must be the 5-line file your login script expects
       - name: Recreate essential secret files in $RUNNER_TEMP and symlink into CWD
         env:
-          API_KEY_VS: ${{ secrets.API_KEY_VS }}           # 5-line file content: key,secret,user,pass,totp
-          ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }} # optional existing token
-          CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}     # Google creds (used later by scripts)
+          API_KEY_VS:       ${{ secrets.API_KEY_VS }}       # 5-line: key,secret,user,pass,totp
+          ACCESS_TOKEN_VS:  ${{ secrets.ACCESS_TOKEN_VS }}  # optional existing token
+          CREDS_VS_JSON:    ${{ secrets.CREDS_VS_JSON }}    # Google creds (used by your scripts)
         run: |
           set -euo pipefail
           tmp="$RUNNER_TEMP"
           mkdir -p "$tmp"
 
           # Write the 5-line secrets file expected by auto_login_vs.py
-          printf '%s' "${API_KEY_VS:-}" > "$tmp/api_key_vs.txt"
+          if [ -z "${API_KEY_VS:-}" ]; then
+            echo "::error::Secret API_KEY_VS is empty. It must contain 5 lines: api_key, api_secret, user_id, password, totp_seed."
+            exit 1
+          fi
+          printf '%s' "$API_KEY_VS" > "$tmp/api_key_vs.txt"
 
-          # Optional existing token
+          # Optional existing token (if present)
           if [ -n "${ACCESS_TOKEN_VS:-}" ]; then
             printf '%s' "$ACCESS_TOKEN_VS" > "$tmp/access_token_vs.txt"
           fi
 
-          # Google creds (if provided)
+          # Google creds (optional)
           if [ -n "${CREDS_VS_JSON:-}" ]; then
             printf '%s' "$CREDS_VS_JSON" > "$tmp/creds_vs.json"
           fi
 
-          # Symlink into repo root because scripts expect files in CWD
+          # Symlink into repo root because your scripts & auto_login_vs.py read/write in CWD
           ln -sf "$tmp/api_key_vs.txt" ./api_key_vs.txt
           [ -f "$tmp/access_token_vs.txt" ] && ln -sf "$tmp/access_token_vs.txt" ./access_token_vs.txt || true
           [ -f "$tmp/creds_vs.json" ] && ln -sf "$tmp/creds_vs.json" ./creds_vs.json || true
@@ -86,20 +88,22 @@ jobs:
           . .venv/bin/activate
 
           STATUS="refresh"
-          if [ -s "./api_key_vs.txt" ] && [ -s "./access_token_vs.txt" ]; then
+          # Quick sanity: api_key_vs.txt should have at least 5 lines
+          if [ $(wc -l < api_key_vs.txt) -lt 5 ]; then
+            echo "::error::api_key_vs.txt does not have 5 lines (api_key, api_secret, user_id, password, totp_seed)."
+            exit 1
+          fi
+
+          if [ -s "./access_token_vs.txt" ]; then
             set +e
             python - <<'PY'
 from kiteconnect import KiteConnect
-with open("api_key_vs.txt") as f:
-    lines = [l.strip() for l in f.readlines()]
+lines = [l.strip() for l in open("api_key_vs.txt").read().splitlines()]
 api_key = lines[0]
-with open("access_token_vs.txt") as f:
-    token = f.read().strip()
-
+token   = open("access_token_vs.txt").read().strip()
 kite = KiteConnect(api_key=api_key)
 kite.set_access_token(token)
-# Cheap call to validate token
-kite.margins()
+kite.margins()  # cheap call; raises if invalid/expired
 PY
             rc=$?
             set -e
@@ -139,7 +143,7 @@ PY
             echo "::error::Token file missing after login."
             exit 1
           fi
-          # Copy a safe copy into $RUNNER_TEMP and keep the symlink pointing there
+          # Copy to $RUNNER_TEMP and keep the CWD symlink pointing there
           cp ./access_token_vs.txt "$RUNNER_TEMP/access_token_vs.txt"
           rm -f ./access_token_vs.txt
           ln -sf "$RUNNER_TEMP/access_token_vs.txt" ./access_token_vs.txt
@@ -153,12 +157,9 @@ PY
           set +e
           python - <<'PY'
 from kiteconnect import KiteConnect
-with open("api_key_vs.txt") as f:
-    lines = [l.strip() for l in f.readlines()]
+lines = [l.strip() for l in open("api_key_vs.txt").read().splitlines()]
 api_key = lines[0]
-with open("access_token_vs.txt") as f:
-    token = f.read().strip()
-
+token   = open("access_token_vs.txt").read().strip()
 kite = KiteConnect(api_key=api_key)
 kite.set_access_token(token)
 kite.margins()
@@ -199,13 +200,6 @@ PY
             gspread gspread-formatting kiteconnect pandas requests \
             retrying tqdm google-auth google-auth-oauthlib google-auth-httplib2 \
             selenium pyotp yfinance oauth2client google-api-python-client
-
-      # (Re)symlink secrets, to be safe before chain runs
-      - name: Ensure secret files are linked for chain scripts
-        run: |
-          [ -f "$RUNNER_TEMP/api_key_vs.txt" ] && ln -sf "$RUNNER_TEMP/api_key_vs.txt" ./api_key_vs.txt || true
-          [ -f "$RUNNER_TEMP/access_token_vs.txt" ] && ln -sf "$RUNNER_TEMP/access_token_vs.txt" ./access_token_vs.txt || true
-          [ -f "$RUNNER_TEMP/creds_vs.json" ] && ln -sf "$RUNNER_TEMP/creds_vs.json" ./creds_vs.json || true
 
       - name: Run (manual command if provided, else choose auto/midday/eod)
         env:
@@ -268,9 +262,9 @@ PY
               python3 set_field_false_vs.py
               python3 fetch_all_gtts_vs.py
               python3 fetch_all_orders_vs.py
-              python3 gtt_processor.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "DEL_GTT_INS"
-              python3 gtt_processor.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "INS_GTT_INS"
-              python3 gtt_processor.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "GTT_INS"
+              python3 gtt_processor_vs.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "DEL_GTT_INS"
+              python3 gtt_processor_vs.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "INS_GTT_INS"
+              python3 gtt_processor_vs.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "GTT_INS"
               echo "::endgroup::"
             else
               echo "::group::RUN: EOD chain (VS)"
