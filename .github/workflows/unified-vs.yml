@@ -38,6 +38,33 @@ jobs:
         with:
           python-version: "3.12"
 
+            - name: Preflight Kite token check
+        id: preflight
+        env:
+          API_KEY_VS: ${{ secrets.API_KEY_VS }}
+          ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }}
+        run: |
+          set -e
+          echo "$API_KEY_VS" > api_key_vs.txt
+          echo "$ACCESS_TOKEN_VS" > access_token_vs.txt
+          python3 -m venv .venv_preflight
+          .venv_preflight/bin/python -m pip install --quiet kiteconnect
+          python3 - <<'PY'
+from kiteconnect import KiteConnect
+import sys, pathlib
+try:
+    api = pathlib.Path("api_key_vs.txt").read_text().splitlines()[0].strip()
+    token = pathlib.Path("access_token_vs.txt").read_text().strip()
+    kite = KiteConnect(api_key=api)
+    kite.set_access_token(token)
+    kite.margins()
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+PY
+          echo "status=$?" >> "$GITHUB_OUTPUT"
+
+
       - name: Install Google Chrome
         run: |
           sudo apt-get update -y
