@@ -2,13 +2,28 @@ name: Unified Script Runner VS
 
 on:
   schedule:
-    - cron: "30 11 * * 1-5"  # 5:00 PM IST, Mon–Fri
+    - cron: "0,30 4-9 * * 1-5"  # 09:30–15:00 IST every 30 mins, Mon–Fri (midday)
+    - cron: "30 11 * * 1-5"     # 17:00 IST (5:00 PM), Mon–Fri (EOD)
   workflow_dispatch:
     inputs:
       command:
         description: "Optional: full command to run (e.g. python3 fetch_holdings_vs.py). Leave empty to run the automated chain."
         required: false
         default: ""
+      run_type:
+        description: "Optional: choose which chain to run when no command is provided."
+        required: false
+        type: choice
+        options:
+          - auto
+          - midday
+          - eod
+        default: auto
+
+# Overlap safety: new runs wait; never cancel in-progress
+concurrency:
+  group: unified-script-runner-vs
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -57,15 +72,69 @@ jobs:
           [ -n "$CREDS_VS_JSON" ] && printf '%s' "$CREDS_VS_JSON" | sudo tee "$MACDIR/creds_vs.json" >/dev/null || true
           ls -l creds_vs.json api_key_vs.txt access_token_vs.txt || true
 
-      - name: Run (manual command if provided, else automated chain)
+      - name: Run (manual command if provided, else choose auto/midday/eod)
         env:
           INPUT_COMMAND: ${{ github.event.inputs.command }}
+          RUN_TYPE: ${{ github.event.inputs.run_type }}
         run: |
           sudo -E bash -lc '
+            set -euo pipefail
             source .venv/bin/activate
+
+            # 1) Manual command overrides everything
             if [ -n "${INPUT_COMMAND:-}" ]; then
+              echo "::notice::Running manual command: ${INPUT_COMMAND}"
               eval "$INPUT_COMMAND"
+              exit 0
+            fi
+
+            # 2) Normalize run_type (default auto)
+            RT="${RUN_TYPE:-auto}"
+
+            # Helper: convert HH:MM to minutes since midnight
+            hm_to_min() {
+              IFS=: read -r h m <<<"$1"
+              echo $((10#$h*60 + 10#$m))
+            }
+
+            # 3) Auto decision window → 09:00–15:45 IST (inclusive)
+            NOW_HM=$(TZ=Asia/Kolkata date +%H:%M)
+            NOW_MIN=$(hm_to_min "$NOW_HM")
+            MID_START=$(hm_to_min "09:00")
+            MID_END=$(hm_to_min "15:45")
+            IN_MIDDAY=false
+            if [ $NOW_MIN -ge $MID_START ] && [ $NOW_MIN -le $MID_END ]; then
+              IN_MIDDAY=true
+            fi
+
+            # 4) Choose which chain to run
+            case "$RT" in
+              midday)
+                echo "::notice::run_type=midday selected"
+                RUN_MIDDAY=true
+                ;;
+              eod)
+                echo "::notice::run_type=eod selected"
+                RUN_MIDDAY=false
+                ;;
+              auto|*)
+                echo "::notice::run_type=auto; current IST time is $NOW_HM"
+                if [ "$IN_MIDDAY" = true ]; then
+                  RUN_MIDDAY=true
+                else
+                  RUN_MIDDAY=false
+                fi
+                ;;
+            esac
+
+            # 5) Execute the chosen chain
+            if [ "$RUN_MIDDAY" = true ]; then
+              echo "::group::RUN: Mid-day chain (VS)"
+              python3 fetch_all_gtts_vs.py
+              python3 fetch_all_orders_vs.py
+              echo "::endgroup::"
             else
+              echo "::group::RUN: EOD chain (VS)"
               python3 fetch_all_gtts_vs.py
               python3 fetch_all_orders_vs.py
               python3 append_new_orders_vs.py
@@ -74,5 +143,6 @@ jobs:
               python3 date_ext_vs.py
               python3 data_val_vs.py
               bash combined_run_vs.sh
+              echo "::endgroup::"
             fi
           '
