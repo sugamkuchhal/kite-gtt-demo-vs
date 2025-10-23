@@ -2,8 +2,8 @@ name: Unified Script Runner VS
 
 on:
   schedule:
-    - cron: "0,30 4-9 * * 1-5"  # 09:30–15:00 IST every 30 mins, Mon–Fri (midday)
-    - cron: "30 11 * * 1-5"     # 17:00 IST (EOD), Mon–Fri
+    - cron: "0,30 4-9 * * 1-5"   # 09:30–15:00 IST every 30 mins, Mon–Fri
+    - cron: "30 11 * * 1-5"      # 17:00 IST, Mon–Fri
   workflow_dispatch:
     inputs:
       command:
@@ -14,7 +14,10 @@ on:
         description: "Optional: choose which chain to run when no command is provided."
         required: false
         type: choice
-        options: [auto, midday, eod]
+        options:
+          - auto
+          - midday
+          - eod
         default: auto
 
 concurrency:
@@ -24,13 +27,13 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # === PRE (no Chrome yet) =================================================
+      # ---------------- PRE (no Chrome yet) ----------------
       - name: Set timezone (IST)
+        shell: bash
         run: echo "TZ=Asia/Kolkata" >> "$GITHUB_ENV"
 
       - name: Set up Python (with pip cache)
@@ -76,7 +79,7 @@ jobs:
           [[ -f "$tmp/access_token_vs.txt" ]] && ln -sf "$tmp/access_token_vs.txt" ./access_token_vs.txt || true
           [[ -f "$tmp/creds_vs.json" ]]       && ln -sf "$tmp/creds_vs.json"       ./creds_vs.json       || true
 
-      - name: Auth preflight (Kite) -> sets auth_status: ok|refresh
+      - name: Auth preflight (Kite) -> sets auth_status
         id: preflight
         shell: bash
         run: |
@@ -99,13 +102,13 @@ kite = KiteConnect(api_key=api_key)
 kite.set_access_token(token)
 kite.margins()  # raises if invalid/expired
 PY
-            [[ $? -eq 0 ]] && STATUS="ok"
+            if [[ $? -eq 0 ]]; then STATUS="ok"; fi
           fi
 
           echo "auth_status=${STATUS}" >> "$GITHUB_OUTPUT"
           echo "::notice::Kite auth preflight: ${STATUS}"
 
-      # === IF REFRESH NEEDED → JIT Chrome & headless login =====================
+      # -------- IF REFRESH NEEDED → JIT Chrome & headless login --------
       - name: Setup Chrome (JIT)
         if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
         uses: browser-actions/setup-chrome@v1
@@ -160,14 +163,14 @@ kite.margins()
 PY
           echo "auth_status_final=ok" >> "$GITHUB_OUTPUT"
 
-      # === POST (only proceed if auth is OK) ===================================
+      # ---------------- POST (only proceed if auth is OK) ----------------
       - name: Compute auth gate
         id: authgate
         shell: bash
         run: |
           if [[ "${{ steps.preflight.outputs.auth_status }}" == "ok" ]]; then
             echo "status=ok" >> "$GITHUB_OUTPUT"
-          elif [[ "${{ steps.postcheck.outputs.auth_status_final || '' }}" == "ok" ]]; then
+          elif [[ "${{ steps.postcheck.outcome }}" == "success" ]]; then
             echo "status=ok" >> "$GITHUB_OUTPUT"
           else
             echo "status=fail" >> "$GITHUB_OUTPUT"
