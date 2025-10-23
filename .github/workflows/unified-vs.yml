@@ -2,6 +2,24 @@ name: Unified Script Runner VS
 
 on:
   workflow_dispatch:
+    inputs:
+      command:
+        description: "Optional command (e.g. python3 fetch_holdings_vs.py)"
+        required: false
+        default: ""
+      run_type:
+        description: "auto / midday / eod"
+        required: false
+        type: choice
+        options:
+          - auto
+          - midday
+          - eod
+        default: auto
+
+concurrency:
+  group: unified-script-runner-vs
+  cancel-in-progress: false
 
 jobs:
   run:
@@ -28,36 +46,33 @@ jobs:
         id: preflight
         shell: bash
         env:
-          API_KEY_VS: ${{ secrets.API_KEY_VS }}
+          API_KEY_VS: ${{ secrets.API_KEY_VS }}       # 5 lines: api_key, api_secret, user_id, password, totp
           ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }}
         run: |
           set -e
-          echo "$API_KEY_VS" > api_key_vs.txt
-          echo "${ACCESS_TOKEN_VS:-}" > access_token_vs.txt
+          printf '%s' "${API_KEY_VS}" > api_key_vs.txt
+          printf '%s' "${ACCESS_TOKEN_VS:-}" > access_token_vs.txt
           source .venv/bin/activate
           STATUS=refresh
           if [ -s access_token_vs.txt ]; then
-            python - <<'PY' || exit 2
-from kiteconnect import KiteConnect
-lines=[l.strip() for l in open("api_key_vs.txt")]
-api_key=lines[0]
-token=open("access_token_vs.txt").read().strip()
-kite=KiteConnect(api_key=api_key)
-kite.set_access_token(token)
-kite.margins()
-PY
-            [ $? -eq 0 ] && STATUS=ok || STATUS=refresh
+            python -c "from kiteconnect import KiteConnect,exceptions as E;
+lines=[l.strip() for l in open('api_key_vs.txt').read().splitlines()];
+api_key=lines[0];
+token=open('access_token_vs.txt').read().strip();
+k=KiteConnect(api_key=api_key); k.set_access_token(token);
+k.margins()"
+            if [ $? -eq 0 ]; then STATUS=ok; fi
           fi
-          echo "auth_status=$STATUS" >> "$GITHUB_OUTPUT"
-          echo "::notice::preflight=$STATUS"
+          echo "auth_status=${STATUS}" >> "$GITHUB_OUTPUT"
+          echo "::notice::preflight=${STATUS}"
 
-      - name: Install Chrome JIT if needed
+      - name: Install Chrome JIT (only if refresh needed)
         if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
 
-      - name: Install automation deps
+      - name: Install automation deps (only if refresh needed)
         if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
         shell: bash
         run: |
@@ -65,7 +80,7 @@ PY
           source .venv/bin/activate
           pip install selenium pyotp webdriver-manager
 
-      - name: Refresh token (headless)
+      - name: Refresh token headlessly
         if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
         shell: bash
         env:
@@ -74,9 +89,10 @@ PY
           set -e
           source .venv/bin/activate
           python3 auto_login_vs.py
-          [ -s access_token_vs.txt ] || { echo "::error::No token after login"; exit 1; }
+          if [ ! -s access_token_vs.txt ]; then
+            echo "::error::No token after login"; exit 1; fi
 
-      - name: Install full deps and run chain
+      - name: Install full deps and stop (hook up chain next)
         shell: bash
         run: |
           set -e
@@ -84,4 +100,4 @@ PY
           pip install gspread gspread-formatting kiteconnect pandas requests retrying tqdm \
                      google-auth google-auth-oauthlib google-auth-httplib2 selenium pyotp \
                      yfinance oauth2client google-api-python-client
-          echo "::notice::Ready to run trading chain..."
+          echo "::notice::Auth path done; ready to plug in your chain."
