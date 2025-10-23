@@ -1,6 +1,9 @@
 name: Unified Script Runner VS
 
 on:
+  schedule:
+    - cron: "0,30 4-9 * * 1-5"
+    - cron: "30 11 * * 1-5"
   workflow_dispatch:
     inputs:
       command:
@@ -35,81 +38,69 @@ jobs:
           python-version: "3.12"
           cache: "pip"
 
-      - name: Create venv and base deps
+      - name: Create venv and minimal deps
         shell: bash
         run: |
           set -e
           python -m venv .venv
           source .venv/bin/activate
           python -m pip install --upgrade pip
-          pip install kiteconnect requests selenium pyotp webdriver-manager
+          pip install kiteconnect requests
 
-      - name: Write secrets into $RUNNER_TEMP and link into CWD
+      - name: Write secrets and preflight auth
+        id: preflight
         shell: bash
         env:
-          API_KEY_VS: ${{ secrets.API_KEY_VS }}       # 5 lines: key,secret,user,pass,totp
+          API_KEY_VS: ${{ secrets.API_KEY_VS }}
           ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }}
-          CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}
         run: |
           set -e
-          tmp="$RUNNER_TEMP"; mkdir -p "$tmp"
+          printf '%s' "${API_KEY_VS}" > api_key_vs.txt
+          printf '%s' "${ACCESS_TOKEN_VS:-}" > access_token_vs.txt
 
-          # api_key_vs.txt (required, 5 lines)
-          if [ -z "${API_KEY_VS:-}" ]; then
-            echo "::error::Secret API_KEY_VS is empty. It must contain 5 lines: api_key, api_secret, user_id, password, totp_seed."
-            exit 1
+          source .venv/bin/activate
+          STATUS="refresh"
+          if [ -s access_token_vs.txt ]; then
+            python -c "from kiteconnect import KiteConnect; import sys;
+lines=[l.strip() for l in open('api_key_vs.txt')];
+api_key=lines[0]; token=open('access_token_vs.txt').read().strip();
+kite=KiteConnect(api_key=api_key);
+kite.set_access_token(token);
+try: kite.margins(); sys.exit(0)
+except Exception: sys.exit(1)" && STATUS="ok" || STATUS="refresh"
           fi
-          printf '%s' "$API_KEY_VS" > "$tmp/api_key_vs.txt"
+          echo "auth_status=${STATUS}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Kite preflight: ${STATUS}"
 
-          # Optional access token from secrets (used to skip Chrome)
-          printf '%s' "${ACCESS_TOKEN_VS:-}" > "$tmp/access_token_vs.txt"
-
-          # Optional Google creds for your later scripts
-          if [ -n "${CREDS_VS_JSON:-}" ]; then
-            printf '%s' "$CREDS_VS_JSON" > "$tmp/creds_vs.json"
-          fi
-
-          # Symlink into CWD because your scripts read/write here
-          ln -sf "$tmp/api_key_vs.txt" ./api_key_vs.txt
-          ln -sf "$tmp/access_token_vs.txt" ./access_token_vs.txt
-          [ -f "$tmp/creds_vs.json" ] && ln -sf "$tmp/creds_vs.json" ./creds_vs.json || true
-
-      - name: Decide if Chrome/login is needed
-        id: need
-        shell: bash
-        run: |
-          set -e
-          if [ -s "./access_token_vs.txt" ]; then
-            echo "refresh=no" >> "$GITHUB_OUTPUT"
-            echo "::notice::Token present from secrets; skipping Chrome/login."
-          else
-            echo "refresh=yes" >> "$GITHUB_OUTPUT"
-            echo "::notice::No token present; will install Chrome and login."
-          fi
-
-      - name: Setup Chrome (JIT)
-        if: ${{ steps.need.outputs.refresh == 'yes' }}
+      - name: Setup Chrome (only if auth refresh needed)
+        if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
         uses: browser-actions/setup-chrome@v1
         with:
           chrome-version: stable
 
-      - name: Refresh token headlessly (only if needed)
-        if: ${{ steps.need.outputs.refresh == 'yes' }}
+      - name: Install automation deps (only if refresh needed)
+        if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
+        shell: bash
+        run: |
+          set -e
+          source .venv/bin/activate
+          pip install selenium pyotp webdriver-manager
+
+      - name: Refresh token via auto_login_vs.py (only if refresh needed)
+        if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
         shell: bash
         env:
           CI: "true"
         run: |
           set -e
           source .venv/bin/activate
+          echo "::notice::Running headless login to refresh token..."
           python3 auto_login_vs.py
-          if [ ! -s ./access_token_vs.txt ]; then
-            echo "::error::No token after login"
+          if [ ! -s access_token_vs.txt ]; then
+            echo "::error::Token refresh failed; file missing."
             exit 1
           fi
-          # Keep a safe copy in $RUNNER_TEMP and symlink (optional)
-          cp ./access_token_vs.txt "$RUNNER_TEMP/access_token_vs.txt"
-          rm -f ./access_token_vs.txt
-          ln -sf "$RUNNER_TEMP/access_token_vs.txt" ./access_token_vs.txt
+          echo "::notice::Token refreshed successfully."
 
       - name: Install full project deps
         shell: bash
@@ -130,14 +121,14 @@ jobs:
           set -e
           source .venv/bin/activate
 
-          # Manual command override
+          # Manual override
           if [ -n "${INPUT_COMMAND:-}" ]; then
             echo "::notice::manual: $INPUT_COMMAND"
             eval "$INPUT_COMMAND"
             exit 0
           fi
 
-          # Auto/midday/eod switch using IST time
+          # Decide run_type by IST time
           hm_to_min(){ IFS=: read -r h m <<<"$1"; echo $((10#$h*60+10#$m)); }
           NOW_HM="$(TZ=Asia/Kolkata date +%H:%M)"
           NOW_MIN="$(hm_to_min "$NOW_HM")"
@@ -153,6 +144,7 @@ jobs:
             *)      RUN_MIDDAY=$([ "$IN_MIDDAY" = true ] && echo true || echo false) ;;
           esac
 
+          # Execute chain
           if [ "$RUN_MIDDAY" = true ]; then
             echo "::group::RUN: Mid-day chain (VS)"
             python3 set_field_false_vs.py
