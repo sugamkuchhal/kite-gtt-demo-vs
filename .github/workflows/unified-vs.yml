@@ -49,6 +49,7 @@ jobs:
           echo "$ACCESS_TOKEN_VS" > access_token_vs.txt
           python3 -m venv .venv_preflight
           .venv_preflight/bin/python -m pip install --quiet kiteconnect
+
           python3 - <<'PY'
 from kiteconnect import KiteConnect
 import sys, pathlib
