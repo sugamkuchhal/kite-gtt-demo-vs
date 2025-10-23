@@ -49,21 +49,13 @@ jobs:
           echo "$ACCESS_TOKEN_VS" > access_token_vs.txt
           python3 -m venv .venv_preflight
           .venv_preflight/bin/python -m pip install --quiet kiteconnect
-          python3 - <<'PY'
-from kiteconnect import KiteConnect
-import sys, pathlib
-
-try:
-    api = pathlib.Path("api_key_vs.txt").read_text().splitlines()[0].strip()
-    token = pathlib.Path("access_token_vs.txt").read_text().strip()
-    kite = KiteConnect(api_key=api)
-    kite.set_access_token(token)
-    kite.margins()
-    sys.exit(0)
-except Exception:
-    sys.exit(1)
-PY
-          echo "status=$?" >> "$GITHUB_OUTPUT"
+          if .venv_preflight/bin/python preflight_vs.py; then
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+            echo "::notice::Kite token valid – skipping Chrome."
+          else
+            echo "status=fail" >> "$GITHUB_OUTPUT"
+            echo "::warning::Kite token invalid – Chrome will be installed."
+          fi
 
       - name: Install Google Chrome
         run: |
