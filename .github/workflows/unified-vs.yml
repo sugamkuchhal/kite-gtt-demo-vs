@@ -38,7 +38,7 @@ jobs:
         with:
           python-version: "3.12"
 
-            - name: Preflight Kite token check
+      - name: Preflight Kite token check
         id: preflight
         env:
           API_KEY_VS: ${{ secrets.API_KEY_VS }}
