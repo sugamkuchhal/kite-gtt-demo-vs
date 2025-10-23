@@ -136,7 +136,6 @@ jobs:
               python3 fetch_all_orders_vs.py
               python3 gtt_processor_vs.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "DEL_GTT_INS"
               python3 gtt_processor_vs.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "INS_GTT_INS"
-              python3 gtt_processor_vs.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "GTT_INS"
               echo "::endgroup::"
             else
               echo "::group::RUN: EOD chain (VS)"
