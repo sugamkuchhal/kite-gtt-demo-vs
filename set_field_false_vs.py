@@ -2,7 +2,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 
 # Path to your service account JSON file
-SERVICE_ACCOUNT_FILE = "service_account.json"
+SERVICE_ACCOUNT_FILE = "creds_vs.json"
 SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
 SPREADSHEET_ID = "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI"
