@@ -59,32 +59,14 @@ jobs:
             printf '%s' "${CREDS_VS_JSON}" > creds_vs.json
           fi
           source .venv/bin/activate
-          cat > preflight.py << 'PY'
-from kiteconnect import KiteConnect
-import sys, pathlib
-api_lines = pathlib.Path("api_key_vs.txt").read_text().splitlines()
-if not api_lines:
-    sys.exit(2)
-api_key = api_lines[0].strip()
-tok = pathlib.Path("access_token_vs.txt")
-if not tok.exists() or tok.stat().st_size == 0:
-    sys.exit(3)
-token = tok.read_text().strip()
-kite = KiteConnect(api_key=api_key)
-kite.set_access_token(token)
+          STATUS="refresh"
+          python -c "from kiteconnect import KiteConnect; import sys, pathlib; L=pathlib.Path('api_key_vs.txt').read_text().splitlines(); sys.exit(2) if not L else None; api=L[0].strip(); P=pathlib.Path('access_token_vs.txt'); sys.exit(3) if (not P.exists() or P.stat().st_size==0) else None; tok=P.read_text().strip(); k=KiteConnect(api_key=api); k.set_access_token(tok); import traceback; 
 try:
-    kite.margins()
-    sys.exit(0)
+ k.margins(); sys.exit(0)
 except Exception:
-    sys.exit(4)
-PY
-          if python preflight.py; then
-            echo "auth_status=ok" >> "$GITHUB_OUTPUT"
-            echo "::notice::Kite preflight: ok"
-          else
-            echo "auth_status=refresh" >> "$GITHUB_OUTPUT"
-            echo "::notice::Kite preflight: refresh needed"
-          fi
+ sys.exit(4)" && STATUS="ok" || STATUS="refresh"
+          echo "auth_status=${STATUS}" >> "$GITHUB_OUTPUT"
+          echo "::notice::Kite preflight: ${STATUS}"
 
       - name: Abort if refresh needed (token invalid)
         if: ${{ steps.preflight.outputs.auth_status == 'refresh' }}
