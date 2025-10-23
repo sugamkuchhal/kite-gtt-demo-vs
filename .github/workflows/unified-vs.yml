@@ -54,7 +54,9 @@ jobs:
 from kiteconnect import KiteConnect
 import sys, pathlib
 try:
+
     api = pathlib.Path("api_key_vs.txt").read_text().splitlines()[0].strip()
+
     token = pathlib.Path("access_token_vs.txt").read_text().strip()
     kite = KiteConnect(api_key=api)
     kite.set_access_token(token)
