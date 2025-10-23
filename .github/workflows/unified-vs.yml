@@ -130,11 +130,16 @@ jobs:
             # 5) Execute the chosen chain
             if [ "$RUN_MIDDAY" = true ]; then
               echo "::group::RUN: Mid-day chain (VS)"
+              python3 set_field_false_vs.py
               python3 fetch_all_gtts_vs.py
               python3 fetch_all_orders_vs.py
+              python3 gtt_processor.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "DEL_GTT_INS"
+              python3 gtt_processor.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "INS_GTT_INS"
+              python3 gtt_processor.py --sheet-id "145TqrpQ3Twx6Tezh28s5GnbowlBb_qcY5UM1RvfIclI" --sheet-name "GTT_INS"
               echo "::endgroup::"
             else
               echo "::group::RUN: EOD chain (VS)"
+              python3 set_field_false_vs.py
               python3 fetch_all_gtts_vs.py
               python3 fetch_all_orders_vs.py
               python3 append_new_orders_vs.py
