@@ -64,7 +64,6 @@ except Exception:
 PY
           echo "status=$?" >> "$GITHUB_OUTPUT"
 
-
       - name: Install Google Chrome
         run: |
           sudo apt-get update -y
