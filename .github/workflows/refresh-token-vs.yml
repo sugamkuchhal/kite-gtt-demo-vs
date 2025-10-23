@@ -57,7 +57,7 @@ jobs:
       - name: Update GitHub secret with new access token
         shell: bash
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -e
           NEW_TOKEN=$(cat access_token_vs.txt)
