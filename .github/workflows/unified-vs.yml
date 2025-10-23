@@ -58,6 +58,7 @@ jobs:
           fi
 
       - name: Install Google Chrome
+        if: ${{ steps.preflight.outputs.status == 'fail' }}      
         run: |
           sudo apt-get update -y
           sudo apt-get install -y wget unzip
