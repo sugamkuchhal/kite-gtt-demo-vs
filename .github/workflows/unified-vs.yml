@@ -2,8 +2,8 @@ name: Unified Script Runner VS
 
 on:
   schedule:
-    - cron: "0,30 4-9 * * 1-5"   # 09:30–15:00 IST every 30 min
-    - cron: "30 11 * * 1-5"      # 17:00 IST EOD
+    - cron: "0,30 4-9 * * 1-5"
+    - cron: "30 11 * * 1-5"
   workflow_dispatch:
     inputs:
       command:
@@ -44,55 +44,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install kiteconnect requests
 
-      # Write secrets (access token comes from nightly refresh), then preflight
       - name: Write secrets and preflight auth
         id: preflight
         shell: bash
         env:
-          API_KEY_VS: ${{ secrets.API_KEY_VS }}         # 5 lines: key,secret,user,pass,totp
-          ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }} # from nightly refresh workflow
-          CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}   # Google creds for your scripts
+          API_KEY_VS: ${{ secrets.API_KEY_VS }}
+          ACCESS_TOKEN_VS: ${{ secrets.ACCESS_TOKEN_VS }}
+          CREDS_VS_JSON: ${{ secrets.CREDS_VS_JSON }}
         run: |
           set -e
-          # Secrets to files expected by your scripts
           printf '%s' "${API_KEY_VS}" > api_key_vs.txt
           printf '%s' "${ACCESS_TOKEN_VS:-}" > access_token_vs.txt
           if [ -n "${CREDS_VS_JSON:-}" ]; then
             printf '%s' "${CREDS_VS_JSON}" > creds_vs.json
           fi
-
           source .venv/bin/activate
-          # Preflight Python (cheap margins() call to validate token)
           cat > preflight.py << 'PY'
 from kiteconnect import KiteConnect
 import sys, pathlib
-
 api_lines = pathlib.Path("api_key_vs.txt").read_text().splitlines()
 if not api_lines:
     sys.exit(2)
 api_key = api_lines[0].strip()
-
-tok_file = pathlib.Path("access_token_vs.txt")
-if not tok_file.exists() or tok_file.stat().st_size == 0:
-    sys.exit(3)  # no token -> need refresh
-
-token = tok_file.read_text().strip()
+tok = pathlib.Path("access_token_vs.txt")
+if not tok.exists() or tok.stat().st_size == 0:
+    sys.exit(3)
+token = tok.read_text().strip()
 kite = KiteConnect(api_key=api_key)
 kite.set_access_token(token)
-
 try:
-    kite.margins()  # raises if invalid/expired
-    sys.exit(0)     # ok
+    kite.margins()
+    sys.exit(0)
 except Exception:
-    sys.exit(4)     # invalid -> need refresh
+    sys.exit(4)
 PY
-
           if python preflight.py; then
             echo "auth_status=ok" >> "$GITHUB_OUTPUT"
-            echo "::notice::Kite preflight: ok (using saved access token)"
+            echo "::notice::Kite preflight: ok"
           else
             echo "auth_status=refresh" >> "$GITHUB_OUTPUT"
-            echo "::notice::Kite preflight: refresh needed (token invalid/missing)"
+            echo "::notice::Kite preflight: refresh needed"
           fi
 
       - name: Abort if refresh needed (token invalid)
@@ -112,7 +103,6 @@ PY
             retrying tqdm google-auth google-auth-oauthlib google-auth-httplib2 \
             selenium pyotp yfinance oauth2client google-api-python-client
 
-      # Full chain: manual override OR auto/midday/eod selection (IST window)
       - name: Run trading chain
         env:
           INPUT_COMMAND: ${{ github.event.inputs.command }}
@@ -122,14 +112,12 @@ PY
           set -e
           source .venv/bin/activate
 
-          # 1) Manual command override
           if [ -n "${INPUT_COMMAND:-}" ]; then
             echo "::notice::Running manual command: ${INPUT_COMMAND}"
             eval "${INPUT_COMMAND}"
             exit 0
           fi
 
-          # 2) Decide run_type (default auto) based on IST clock
           hm_to_min(){ IFS=: read -r h m <<<"$1"; echo $((10#$h*60 + 10#$m)); }
           NOW_HM="$(TZ=Asia/Kolkata date +%H:%M)"
           NOW_MIN="$(hm_to_min "$NOW_HM")"
@@ -160,7 +148,6 @@ PY
               ;;
           esac
 
-          # 3) Execute chosen chain
           if [ "$RUN_MIDDAY" = true ]; then
             echo "::group::RUN: Mid-day chain (VS)"
             python3 set_field_false_vs.py
