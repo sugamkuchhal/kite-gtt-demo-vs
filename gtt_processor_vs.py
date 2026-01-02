@@ -164,6 +164,8 @@ def process_update(
             "tag": method,
         }
 
+        final_price = apply_buffer_and_round(price, side, tick_size)
+
         try:
             safe_api_call(
                 kite.modify_gtt,
